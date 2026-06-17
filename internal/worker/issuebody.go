@@ -136,13 +136,25 @@ func writeDocuments(b *strings.Builder, p report.Payload) {
 	}
 }
 
+// writeTransactionLog renders the transaction-manager events since the app opened, each with
+// its full recipe payload so the interaction sequence can be replayed precisely. The whole
+// log is collapsed, and each event's recipe is a nested collapsed YAML block, so a long
+// session stays readable.
 func writeTransactionLog(b *strings.Builder, p report.Payload) {
 	if len(p.TransactionLog) == 0 {
 		return
 	}
-	b.WriteString("\n<details><summary>Transaction log</summary>\n\n")
-	for i, step := range p.TransactionLog {
-		fmt.Fprintf(b, "%d. %s\n", i+1, step)
+	fmt.Fprintf(b, "\n<details><summary>Transaction log (%d events since launch)</summary>\n\n", len(p.TransactionLog))
+	for i, e := range p.TransactionLog {
+		fmt.Fprintf(b, "%d. `%s` %s — **%s**\n", i+1, e.Time, mdCell(e.Document), mdCell(e.Label))
+		if strings.TrimSpace(e.Recipe) != "" {
+			b.WriteString("<details><summary>recipe</summary>\n\n```yaml\n")
+			b.WriteString(e.Recipe)
+			if !strings.HasSuffix(e.Recipe, "\n") {
+				b.WriteString("\n")
+			}
+			b.WriteString("```\n</details>\n")
+		}
 	}
 	b.WriteString("\n</details>\n")
 }

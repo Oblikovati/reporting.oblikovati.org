@@ -57,7 +57,7 @@ func TestIssueBodyRendersDocumentYAMLActiveFirst(t *testing.T) {
 		OS:             "linux",
 		Arch:           "amd64",
 		AppVersion:     "0.16.0",
-		TransactionLog: []string{"Sketch", "Extrude"},
+		TransactionLog: []report.TransactionEvent{{Time: "09:00:12", Document: "main", Label: "Extrude", Recipe: "features:\n  - extrude\n"}},
 		UserSettings:   "general:\n  gridVisible: true\n",
 		OpenDocuments: []report.DocumentInfo{
 			{Name: "main|part", Type: "part", Path: "/tmp/main.opd", Dirty: true, Active: true, Content: "schemaVersion: 2\ndocumentType: 1\n"},
@@ -65,10 +65,13 @@ func TestIssueBodyRendersDocumentYAMLActiveFirst(t *testing.T) {
 		},
 	})
 	for _, want := range []string{
-		"### What happened", "crash", "linux", "amd64", "Extrude", "report id: `rep9`",
+		"### What happened", "crash", "linux", "amd64", "report id: `rep9`",
 		"Active document — main\\|part", // pipe escaped, active labelled
 		"Other document — sub",
 		"```yaml\nschemaVersion: 2\ndocumentType: 1\n```",
+		"Transaction log (1 events since launch)",
+		"**Extrude**",            // the transaction label
+		"features:\n  - extrude", // the replayable recipe payload
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)

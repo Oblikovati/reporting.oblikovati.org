@@ -9,17 +9,27 @@ package report
 // Payload is one submitted bug report. The two screenshots arrive base64-encoded because
 // they are []byte in JSON.
 type Payload struct {
-	Comment        string         `json:"comment"`
-	OS             string         `json:"os"`
-	Arch           string         `json:"arch"`
-	AppVersion     string         `json:"appVersion"`
-	AppCommit      string         `json:"appCommit"`
-	AppBuildDate   string         `json:"appBuildDate"`
-	UserSettings   string         `json:"userSettings"`
-	OpenDocuments  []DocumentInfo `json:"openDocuments"`
-	TransactionLog []string       `json:"transactionLog"`
-	WindowPNG      []byte         `json:"windowPng,omitempty"`
-	ViewportPNG    []byte         `json:"viewportPng,omitempty"`
+	Comment        string             `json:"comment"`
+	OS             string             `json:"os"`
+	Arch           string             `json:"arch"`
+	AppVersion     string             `json:"appVersion"`
+	AppCommit      string             `json:"appCommit"`
+	AppBuildDate   string             `json:"appBuildDate"`
+	UserSettings   string             `json:"userSettings"`
+	OpenDocuments  []DocumentInfo     `json:"openDocuments"`
+	TransactionLog []TransactionEvent `json:"transactionLog"`
+	WindowPNG      []byte             `json:"windowPng,omitempty"`
+	ViewportPNG    []byte             `json:"viewportPng,omitempty"`
+}
+
+// TransactionEvent is one committed transaction since the app opened. Recipe is the
+// document's full parametric recipe (the complete command payload) at that step, so the
+// sequence replays the user's interactions precisely.
+type TransactionEvent struct {
+	Time     string `json:"time"`
+	Document string `json:"document"`
+	Label    string `json:"label"`
+	Recipe   string `json:"recipe,omitempty"`
 }
 
 // DocumentInfo is one open document at the time of the report. Content is the document's
