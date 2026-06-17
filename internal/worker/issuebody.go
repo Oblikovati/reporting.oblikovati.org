@@ -12,24 +12,58 @@ import (
 // titleMaxLen keeps the issue title to a single readable line.
 const titleMaxLen = 80
 
-// issueTitle derives a one-line issue title from the user's comment, falling back to a
-// generic title when the comment is empty.
+// issueTitle derives a stable one-line title. The user's comment is optional, so the title
+// is NOT taken from it; it names the active document instead, falling back to a generic
+// title when no document is open.
 func issueTitle(p report.Payload) string {
-	line := firstLine(p.Comment)
-	if line == "" {
-		return "Bug report (no description)"
+	if d, ok := activeDoc(p); ok && strings.TrimSpace(d.Name) != "" {
+		return "Bug report — " + truncate(d.Name, titleMaxLen)
 	}
-	return "Bug report: " + truncate(line, titleMaxLen)
+	return "User-submitted bug report"
+}
+
+// issueLabels builds the labels for a report: a constant "user-submitted", an
+// "<os>-<arch>" platform label, and the active document's kind as "<type>-document"
+// (e.g. "part-document"). GitHub creates any that do not yet exist.
+func issueLabels(p report.Payload) []string {
+	labels := []string{"user-submitted"}
+	if p.OS != "" && p.Arch != "" {
+		labels = append(labels, p.OS+"-"+p.Arch)
+	}
+	if t := activeDocType(p); t != "" {
+		labels = append(labels, t+"-document")
+	}
+	return labels
+}
+
+// activeDocType is the active document's kind (e.g. "part"), or "" when there is no usable
+// active document.
+func activeDocType(p report.Payload) string {
+	if d, ok := activeDoc(p); ok && d.Type != "" && d.Type != "unknown" {
+		return d.Type
+	}
+	return ""
+}
+
+// activeDoc returns the active open document (the host sends it first and flags it).
+func activeDoc(p report.Payload) (report.DocumentInfo, bool) {
+	for _, d := range p.OpenDocuments {
+		if d.Active {
+			return d, true
+		}
+	}
+	return report.DocumentInfo{}, false
 }
 
 // issueBody renders the report as GitHub-flavoured markdown: the user's comment, the
-// embedded screenshots (served by this service), and collapsible diagnostics.
+// embedded screenshots, the open documents as YAML code blocks (active first), and the
+// remaining diagnostics.
 func (w *Worker) issueBody(id string, p report.Payload) string {
 	var b strings.Builder
 	writeComment(&b, p.Comment)
 	w.writeScreenshots(&b, id, p)
 	writeEnvironment(&b, p)
-	writeOpenDocuments(&b, p)
+	writeDocuments(&b, p)
 	writeTransactionLog(&b, p)
 	writeSettings(&b, p)
 	fmt.Fprintf(&b, "\n<sub>report id: `%s`</sub>\n", id)
@@ -64,24 +98,41 @@ func (w *Worker) writeScreenshots(b *strings.Builder, id string, p report.Payloa
 
 func writeEnvironment(b *strings.Builder, p report.Payload) {
 	b.WriteString("\n### Environment\n\n")
-	fmt.Fprintf(b, "| | |\n|---|---|\n")
+	b.WriteString("| | |\n|---|---|\n")
 	fmt.Fprintf(b, "| OS / Arch | %s / %s |\n", mdCell(p.OS), mdCell(p.Arch))
 	fmt.Fprintf(b, "| Version | %s |\n", mdCell(p.AppVersion))
 	fmt.Fprintf(b, "| Commit | %s |\n", mdCell(p.AppCommit))
 	fmt.Fprintf(b, "| Build date | %s |\n", mdCell(p.AppBuildDate))
 }
 
-func writeOpenDocuments(b *strings.Builder, p report.Payload) {
+// writeDocuments renders each open document's .obk YAML as a code block, the active document
+// first, so a triager can reproduce from the exact files. A document whose content could
+// not be captured is noted rather than skipped.
+func writeDocuments(b *strings.Builder, p report.Payload) {
 	if len(p.OpenDocuments) == 0 {
 		return
 	}
-	b.WriteString("\n### Open documents\n\n")
+	b.WriteString("\n### Open documents\n")
 	for _, d := range p.OpenDocuments {
+		heading := "Other document"
+		if d.Active {
+			heading = "Active document"
+		}
 		dirty := ""
 		if d.Dirty {
 			dirty = " *(unsaved)*"
 		}
-		fmt.Fprintf(b, "- **%s** (%s) — `%s`%s\n", mdCell(d.Name), mdCell(d.Type), d.Path, dirty)
+		fmt.Fprintf(b, "\n**%s — %s** (%s) `%s`%s\n\n", heading, mdCell(d.Name), mdCell(d.Type), d.Path, dirty)
+		if strings.TrimSpace(d.Content) == "" {
+			b.WriteString("_document content unavailable_\n")
+			continue
+		}
+		b.WriteString("```yaml\n")
+		b.WriteString(d.Content)
+		if !strings.HasSuffix(d.Content, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("```\n")
 	}
 }
 
@@ -106,13 +157,6 @@ func writeSettings(b *strings.Builder, p report.Payload) {
 		b.WriteString("\n")
 	}
 	b.WriteString("```\n\n</details>\n")
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return strings.TrimSpace(s[:i])
-	}
-	return strings.TrimSpace(s)
 }
 
 func truncate(s string, n int) string {

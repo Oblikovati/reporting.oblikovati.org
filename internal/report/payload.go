@@ -22,11 +22,13 @@ type Payload struct {
 	ViewportPNG    []byte         `json:"viewportPng,omitempty"`
 }
 
-// DocumentInfo summarises one open document at the time of the report.
+// DocumentInfo is one open document at the time of the report. Content is the document's
+// full .obk YAML (the file as saved); the active document is sent first and has Active=true.
 type DocumentInfo struct {
-	Path            string `json:"path"`
-	Name            string `json:"name"`
-	Type            string `json:"type"`
-	Dirty           bool   `json:"dirty"`
-	DisplaySettings string `json:"displaySettings,omitempty"`
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Dirty   bool   `json:"dirty"`
+	Active  bool   `json:"active"`
+	Content string `json:"content,omitempty"`
 }

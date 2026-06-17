@@ -12,16 +12,19 @@ import (
 	"testing"
 )
 
-func TestCreateIssueReturnsNumber(t *testing.T) {
+func TestCreateIssueSendsTitleLabelsAndType(t *testing.T) {
 	var gotAuth, gotPath string
-	var gotTitle string
+	var in struct {
+		Title  string   `json:"title"`
+		Body   string   `json:"body"`
+		Labels []string `json:"labels"`
+		Type   string   `json:"type"`
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotPath = r.URL.Path
 		body, _ := io.ReadAll(r.Body)
-		var in struct{ Title, Body string }
 		_ = json.Unmarshal(body, &in)
-		gotTitle = in.Title
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"number":7}`)
 	}))
@@ -29,7 +32,8 @@ func TestCreateIssueReturnsNumber(t *testing.T) {
 
 	c := New("tok123", "Oblikovati", "Oblikovati", srv.Client())
 	c.SetAPIBase(srv.URL)
-	num, err := c.CreateIssue(context.Background(), "Bug report: boom", "body text")
+	num, err := c.CreateIssue(context.Background(), "Bug report — widget", "body text",
+		[]string{"user-submitted", "linux-amd64", "part-document"}, "Bug")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -42,8 +46,14 @@ func TestCreateIssueReturnsNumber(t *testing.T) {
 	if gotPath != "/repos/Oblikovati/Oblikovati/issues" {
 		t.Errorf("path = %q", gotPath)
 	}
-	if gotTitle != "Bug report: boom" {
-		t.Errorf("title = %q", gotTitle)
+	if in.Title != "Bug report — widget" {
+		t.Errorf("title = %q", in.Title)
+	}
+	if in.Type != "Bug" {
+		t.Errorf("type = %q, want Bug", in.Type)
+	}
+	if strings.Join(in.Labels, ",") != "user-submitted,linux-amd64,part-document" {
+		t.Errorf("labels = %v", in.Labels)
 	}
 }
 
@@ -76,7 +86,7 @@ func TestCreateIssueErrorsOnNon201(t *testing.T) {
 
 	c := New("tok", "o", "r", srv.Client())
 	c.SetAPIBase(srv.URL)
-	if _, err := c.CreateIssue(context.Background(), "t", "b"); err == nil {
+	if _, err := c.CreateIssue(context.Background(), "t", "b", nil, ""); err == nil {
 		t.Fatal("want error on 401")
 	}
 }
