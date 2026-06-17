@@ -1,0 +1,27 @@
+# Deployment compose for the reporting service. The remote host runs:
+#   docker compose pull && docker compose up -d
+# with REPORTING_IMAGE pointing at the pushed image and the secrets supplied via a
+# host-side .env file (never baked into the image).
+services:
+  reportingd:
+    image: ${REPORTING_IMAGE:-ghcr.io/oblikovati/reporting.oblikovati.org:latest}
+    restart: unless-stopped
+    ports:
+      - "${REPORTING_HOST_PORT:-8080}:8080"
+    environment:
+      REPORTING_PUBLIC_BASE_URL: ${REPORTING_PUBLIC_BASE_URL:-https://reporting.oblikovati.org}
+      REPORTING_GITHUB_TOKEN: ${REPORTING_GITHUB_TOKEN:?set REPORTING_GITHUB_TOKEN in .env}
+      REPORTING_GITHUB_OWNER: ${REPORTING_GITHUB_OWNER:-Oblikovati}
+      REPORTING_GITHUB_REPO: ${REPORTING_GITHUB_REPO:-Oblikovati}
+      REPORTING_POLL_INTERVAL: ${REPORTING_POLL_INTERVAL:-15m}
+    volumes:
+      - reports:/data/reports
+    healthcheck:
+      test: ["CMD", "/reportingd", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  reports:
