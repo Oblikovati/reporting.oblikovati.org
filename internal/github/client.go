@@ -40,9 +40,18 @@ func New(token, owner, repo string, doer httpDoer) *Client {
 // SetAPIBase overrides the API host (tests point it at an httptest server).
 func (c *Client) SetAPIBase(base string) { c.apiBase = base }
 
-// CreateIssue opens an issue and returns its number.
-func (c *Client) CreateIssue(ctx context.Context, title, body string) (int, error) {
-	reqBody, err := json.Marshal(map[string]string{"title": title, "body": body})
+// CreateIssue opens an issue and returns its number. labels are attached (GitHub creates
+// any that do not yet exist, given push access); issueType sets the repository issue type
+// (e.g. "Bug") and is omitted when empty.
+func (c *Client) CreateIssue(ctx context.Context, title, body string, labels []string, issueType string) (int, error) {
+	payload := map[string]any{"title": title, "body": body}
+	if len(labels) > 0 {
+		payload["labels"] = labels
+	}
+	if issueType != "" {
+		payload["type"] = issueType
+	}
+	reqBody, err := json.Marshal(payload)
 	if err != nil {
 		return 0, fmt.Errorf("github: marshal issue: %w", err)
 	}

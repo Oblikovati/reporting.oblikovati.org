@@ -17,9 +17,12 @@ import (
 // issueTimeout bounds a single GitHub issue creation.
 const issueTimeout = 20 * time.Second
 
+// issueType is the GitHub repository issue type stamped on every report.
+const issueType = "Bug"
+
 // IssueCreator opens an issue and returns its number (the github.Client implements it).
 type IssueCreator interface {
-	CreateIssue(ctx context.Context, title, body string) (int, error)
+	CreateIssue(ctx context.Context, title, body string, labels []string, issueType string) (int, error)
 }
 
 // Worker processes jobs from a queue into GitHub issues.
@@ -58,7 +61,7 @@ func (w *Worker) process(ctx context.Context, job queue.Job) error {
 	}
 	issueCtx, cancel := context.WithTimeout(ctx, issueTimeout)
 	defer cancel()
-	number, err := w.gh.CreateIssue(issueCtx, issueTitle(p), w.issueBody(job.ID, p))
+	number, err := w.gh.CreateIssue(issueCtx, issueTitle(p), w.issueBody(job.ID, p), issueLabels(p), issueType)
 	if err != nil {
 		return err
 	}
