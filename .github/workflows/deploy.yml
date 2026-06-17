@@ -1,0 +1,93 @@
+name: Deploy
+
+# Test → build & push the image to GHCR → deploy over SSH (docker compose pull && up -d on
+# the host). Runs on a push to main or a version tag. Secrets are stored as GitHub secrets;
+# the runtime GitHub PAT is written into a host-side .env, never baked into the image.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/oblikovati/reporting.oblikovati.org
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+      - run: go test ./...
+
+  build-push:
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      image: ${{ steps.meta.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve image ref
+        id: meta
+        run: echo "ref=${IMAGE}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.ref }}
+            ${{ env.IMAGE }}:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-push
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy compose file to host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          source: docker-compose.yml
+          target: /opt/reporting
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_REF: ${{ needs.build-push.outputs.image }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          envs: IMAGE_REF
+          script: |
+            set -euo pipefail
+            cd /opt/reporting
+            # Write the runtime environment (the PAT stays on the host, out of the image).
+            cat > .env <<EOF
+            REPORTING_IMAGE=${IMAGE_REF}
+            REPORTING_PUBLIC_BASE_URL=${{ secrets.REPORTING_PUBLIC_BASE_URL }}
+            REPORTING_GITHUB_TOKEN=${{ secrets.REPORTING_GITHUB_TOKEN }}
+            REPORTING_GITHUB_OWNER=${{ secrets.REPORTING_GITHUB_OWNER }}
+            REPORTING_GITHUB_REPO=${{ secrets.REPORTING_GITHUB_REPO }}
+            EOF
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker compose pull
+            docker compose up -d
+            docker image prune -f
