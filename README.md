@@ -35,6 +35,13 @@ app ──POST /report──▶ ingest ──▶ in-memory queue ──▶ worke
   document, transaction event or the settings block is never truncated mid-YAML — one that
   would not fit whole is left out entirely and named in a trailing note instead, so every
   block a triager sees in the issue is complete and trustworthy.
+- If opening the issue fails, a network error or a GitHub 5xx is retried (up to 3 attempts,
+  with backoff); a 4xx (bad request, auth, validation) fails immediately since retrying would
+  just resend the same request. A report that still fails is **dead-lettered**: its full
+  payload and the failure cause are written to `deadletter.json` next to its screenshots
+  instead of being dropped, and the worker log names the report so it can be found and
+  recreated manually (`grep dead-letter` in the container logs, then
+  `cat STORAGE_DIR/<report-id>/deadletter.json`).
 
 ## Authorization
 
