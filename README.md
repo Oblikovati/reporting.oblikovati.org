@@ -29,6 +29,12 @@ app ──POST /report──▶ ingest ──▶ in-memory queue ──▶ worke
 - An `issue.json` next to the screenshots records the issue number. The reconciler polls
   each issue's state and removes the directory once it is `closed`. Because this state lives
   on the volume (not in the in-memory queue), it is correct across restarts.
+- The issue body is kept under GitHub's 65536-character create-issue limit: the comment,
+  screenshots and environment table are always written in full, and the remaining budget is
+  spent on documents, then the transaction log, then user settings, in that order. A
+  document, transaction event or the settings block is never truncated mid-YAML — one that
+  would not fit whole is left out entirely and named in a trailing note instead, so every
+  block a triager sees in the issue is complete and trustworthy.
 
 ## Authorization
 
