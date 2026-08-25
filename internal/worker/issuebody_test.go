@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -90,6 +91,66 @@ func TestIssueBodyNoteWhenContentUnavailable(t *testing.T) {
 	})
 	if !strings.Contains(body, "document content unavailable") {
 		t.Errorf("expected unavailable note:\n%s", body)
+	}
+}
+
+func TestIssueBodyStaysUnderGitHubLimit(t *testing.T) {
+	const githubBodyLimit = 65536
+	docYAML := strings.Repeat("x: 1\n", 20000) // ~100KB, alone bigger than the whole limit
+	docs := make([]report.DocumentInfo, 20)
+	for i := range docs {
+		docs[i] = report.DocumentInfo{Name: fmt.Sprintf("doc%d", i), Type: "part", Active: i == 0, Content: docYAML}
+	}
+	events := make([]report.TransactionEvent, 500)
+	for i := range events {
+		events[i] = report.TransactionEvent{Time: "09:00:00", Document: "main", Label: "Extrude", Recipe: strings.Repeat("y: 2\n", 200)}
+	}
+
+	w := New(nil, nil, nil, "https://reporting.example")
+	body := w.issueBody("bigrep", report.Payload{
+		Comment:        strings.Repeat("why did this happen? ", 2000),
+		OpenDocuments:  docs,
+		TransactionLog: events,
+		UserSettings:   strings.Repeat("z: 3\n", 5000),
+	})
+
+	if len(body) > githubBodyLimit {
+		t.Fatalf("body is %d bytes, exceeds GitHub's %d-character issue-body limit", len(body), githubBodyLimit)
+	}
+	if !strings.Contains(body, "report id: `bigrep`") {
+		t.Error("body missing the trailing report-id footer (it must survive truncation)")
+	}
+	if !strings.Contains(body, "exceeds GitHub's size limit") {
+		t.Error("body missing an omission note explaining what was dropped")
+	}
+}
+
+func TestIssueBodyOmitsOversizedDocumentWholeNotTruncated(t *testing.T) {
+	huge := strings.Repeat("x: 1\n", 20000) // bigger than the whole budget on its own
+	w := New(nil, nil, nil, "https://reporting.example")
+	body := w.issueBody("r", report.Payload{
+		OpenDocuments: []report.DocumentInfo{
+			{Name: "small", Type: "part", Active: true, Content: "schemaVersion: 2\n"},
+			{Name: "huge", Type: "part", Content: huge},
+		},
+	})
+	if !strings.Contains(body, "schemaVersion: 2") {
+		t.Error("small document should still be rendered in full")
+	}
+	if strings.Contains(body, "x: 1\n") {
+		t.Error("oversized document must be omitted whole, not truncated mid-YAML")
+	}
+	if !strings.Contains(body, "huge") {
+		t.Error("the omitted document's name should be named in the omission note")
+	}
+}
+
+func TestDocLabelFallsBackToPlaceholderWhenUnnamed(t *testing.T) {
+	if got := docLabel(report.DocumentInfo{Name: "  "}); got != "unnamed document" {
+		t.Errorf("docLabel(unnamed) = %q, want placeholder", got)
+	}
+	if got := docLabel(report.DocumentInfo{Name: "widget"}); got != "widget" {
+		t.Errorf("docLabel(widget) = %q", got)
 	}
 }
 

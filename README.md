@@ -29,6 +29,19 @@ app ──POST /report──▶ ingest ──▶ in-memory queue ──▶ worke
 - An `issue.json` next to the screenshots records the issue number. The reconciler polls
   each issue's state and removes the directory once it is `closed`. Because this state lives
   on the volume (not in the in-memory queue), it is correct across restarts.
+- The issue body is kept under GitHub's 65536-character create-issue limit: the comment,
+  screenshots and environment table are always written in full, and the remaining budget is
+  spent on documents, then the transaction log, then user settings, in that order. A
+  document, transaction event or the settings block is never truncated mid-YAML — one that
+  would not fit whole is left out entirely and named in a trailing note instead, so every
+  block a triager sees in the issue is complete and trustworthy.
+- If opening the issue fails, a network error or a GitHub 5xx is retried (up to 3 attempts,
+  with backoff); a 4xx (bad request, auth, validation) fails immediately since retrying would
+  just resend the same request. A report that still fails is **dead-lettered**: its full
+  payload and the failure cause are written to `deadletter.json` next to its screenshots
+  instead of being dropped, and the worker log names the report so it can be found and
+  recreated manually (`grep dead-letter` in the container logs, then
+  `cat STORAGE_DIR/<report-id>/deadletter.json`).
 
 ## Authorization
 

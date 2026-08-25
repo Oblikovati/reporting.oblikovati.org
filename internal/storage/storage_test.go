@@ -3,11 +3,14 @@
 package storage
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"oblikovati.org/reporting/internal/report"
 )
 
 func TestSaveServeAndEnumerate(t *testing.T) {
@@ -59,6 +62,42 @@ func TestReportsSkipsDirsWithoutIssueMeta(t *testing.T) {
 	}
 	if len(refs) != 0 {
 		t.Errorf("Reports = %+v, want none (no issue meta)", refs)
+	}
+}
+
+func TestSaveAndReadDeadLetter(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p := report.Payload{Comment: "crash", OS: "linux", Arch: "amd64"}
+	cause := errors.New("github: POST: 422: body too long")
+	if err := st.SaveDeadLetter("stuck", p, cause); err != nil {
+		t.Fatalf("SaveDeadLetter: %v", err)
+	}
+
+	dl, err := st.ReadDeadLetter("stuck")
+	if err != nil {
+		t.Fatalf("ReadDeadLetter: %v", err)
+	}
+	if dl.Payload.Comment != "crash" || dl.Payload.OS != "linux" {
+		t.Errorf("payload = %+v, want the saved report", dl.Payload)
+	}
+	if dl.Error != cause.Error() {
+		t.Errorf("error = %q, want %q", dl.Error, cause.Error())
+	}
+	if dl.FailedAt.IsZero() {
+		t.Error("FailedAt not set")
+	}
+}
+
+func TestReadDeadLetterErrorsWhenNoneSaved(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := st.ReadDeadLetter("nothing-here"); err == nil {
+		t.Fatal("want error reading a dead letter that was never saved")
 	}
 }
 

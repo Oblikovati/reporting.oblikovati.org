@@ -25,6 +25,19 @@ type httpDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+// StatusError reports a non-2xx HTTP response, exposing the status code so a caller (the
+// worker's retry logic) can tell a transient failure (5xx, worth retrying) from a
+// permanent one (4xx: bad request, auth, validation — retrying sends the same request).
+type StatusError struct {
+	Method, Endpoint string
+	Code             int
+	Body             string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("github: %s %q: %d: %s", e.Method, e.Endpoint, e.Code, e.Body)
+}
+
 // Client talks to one repository's issues with a personal access token.
 type Client struct {
 	token, owner, repo string
@@ -109,7 +122,7 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body []byte, w
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if resp.StatusCode != want {
-		return nil, fmt.Errorf("github: %s %q: %s: %s", method, endpoint, resp.Status, bytes.TrimSpace(raw))
+		return nil, &StatusError{Method: method, Endpoint: endpoint, Code: resp.StatusCode, Body: string(bytes.TrimSpace(raw))}
 	}
 	return raw, nil
 }

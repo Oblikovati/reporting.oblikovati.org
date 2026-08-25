@@ -13,13 +13,16 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"oblikovati.org/reporting/internal/report"
 )
 
 // File names within a report directory.
 const (
-	windowFile   = "window.png"
-	viewportFile = "viewport.png"
-	metaFile     = "issue.json"
+	windowFile     = "window.png"
+	viewportFile   = "viewport.png"
+	metaFile       = "issue.json"
+	deadLetterFile = "deadletter.json"
 )
 
 // IssueMeta records which GitHub issue a stored report became, so the reconciler can poll
@@ -33,6 +36,14 @@ type IssueMeta struct {
 type Ref struct {
 	ID    string
 	Issue IssueMeta
+}
+
+// DeadLetter is a report whose GitHub issue could not be created after retries: the full
+// payload plus the failure cause, kept so the report is recoverable rather than lost.
+type DeadLetter struct {
+	Payload  report.Payload `json:"payload"`
+	Error    string         `json:"error"`
+	FailedAt time.Time      `json:"failedAt"`
 }
 
 // Store is a directory of per-report subdirectories.
@@ -72,6 +83,38 @@ func (s *Store) SaveIssueMeta(id string, m IssueMeta) error {
 		return fmt.Errorf("storage: write issue meta for %q: %w", id, err)
 	}
 	return nil
+}
+
+// SaveDeadLetter persists a report that failed to become a GitHub issue after retries, so
+// an operator can inspect or manually recreate it instead of it being silently lost.
+func (s *Store) SaveDeadLetter(id string, p report.Payload, cause error) error {
+	dl := DeadLetter{Payload: p, Error: cause.Error(), FailedAt: time.Now().UTC()}
+	b, err := json.Marshal(dl)
+	if err != nil {
+		return fmt.Errorf("storage: marshal dead letter for %q: %w", id, err)
+	}
+	reportDir := filepath.Join(s.dir, id)
+	if err := os.MkdirAll(reportDir, 0o755); err != nil {
+		return fmt.Errorf("storage: create report dir for %q: %w", id, err)
+	}
+	if err := os.WriteFile(filepath.Join(reportDir, deadLetterFile), b, 0o644); err != nil {
+		return fmt.Errorf("storage: write dead letter for %q: %w", id, err)
+	}
+	return nil
+}
+
+// ReadDeadLetter loads a dead-lettered report's persisted payload and failure cause, or an
+// error when none was recorded for id.
+func (s *Store) ReadDeadLetter(id string) (DeadLetter, error) {
+	b, err := os.ReadFile(filepath.Join(s.dir, id, deadLetterFile))
+	if err != nil {
+		return DeadLetter{}, fmt.Errorf("storage: read dead letter for %q: %w", id, err)
+	}
+	var dl DeadLetter
+	if err := json.Unmarshal(b, &dl); err != nil {
+		return DeadLetter{}, fmt.Errorf("storage: parse dead letter for %q: %w", id, err)
+	}
+	return dl, nil
 }
 
 // Reports enumerates the stored reports that have an issue recorded (so the reconciler only

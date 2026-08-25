@@ -5,6 +5,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -88,5 +89,27 @@ func TestCreateIssueErrorsOnNon201(t *testing.T) {
 	c.SetAPIBase(srv.URL)
 	if _, err := c.CreateIssue(context.Background(), "t", "b", nil, ""); err == nil {
 		t.Fatal("want error on 401")
+	}
+}
+
+func TestCreateIssueErrorExposesStatusCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"message":"upstream timeout"}`)
+	}))
+	defer srv.Close()
+
+	c := New("tok", "o", "r", srv.Client())
+	c.SetAPIBase(srv.URL)
+	_, err := c.CreateIssue(context.Background(), "t", "b", nil, "")
+	if err == nil {
+		t.Fatal("want error on 503")
+	}
+	var se *StatusError
+	if !errors.As(err, &se) {
+		t.Fatalf("error %v is not a *StatusError", err)
+	}
+	if se.Code != http.StatusServiceUnavailable {
+		t.Errorf("StatusError.Code = %d, want %d", se.Code, http.StatusServiceUnavailable)
 	}
 }
