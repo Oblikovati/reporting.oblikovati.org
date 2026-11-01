@@ -26,6 +26,7 @@ jobs:
         run: |
           printf '%s' "$KUBECONFIG_HETZNER" > kubeconfig
           export KUBECONFIG="$PWD/kubeconfig"
+          kubectl scale deployment/reporting -n oblikovati --replicas=0 --ignore-not-found
           kubectl apply -f - <<'EOF'
           apiVersion: v1
           kind: PersistentVolumeClaim
@@ -95,3 +96,5 @@ jobs:
           printf '%s' "$KUBECONFIG_HETZNER" > kubeconfig
           export KUBECONFIG="$PWD/kubeconfig"
           kubectl exec -n oblikovati reporting-storage-transfer -- sh -c 'find /data/reports -mindepth 1 -maxdepth 1 -type d | wc -l'
+          kubectl delete pod/reporting-storage-transfer -n oblikovati --wait=true
+          kubectl scale deployment/reporting -n oblikovati --replicas=1 --ignore-not-found
