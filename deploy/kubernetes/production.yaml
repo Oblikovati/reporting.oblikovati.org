@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oblikovati
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: reporting-data
+  namespace: oblikovati
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reporting
+  namespace: oblikovati
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: reporting
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: reporting
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reportingd
+          image: ghcr.io/oblikovati/reporting.oblikovati.org:placeholder
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: REPORTING_PUBLIC_BASE_URL
+              value: https://reporting.oblikovati.org
+            - name: REPORTING_GITHUB_OWNER
+              value: Oblikovati
+            - name: REPORTING_GITHUB_REPO
+              value: Oblikovati
+            - name: REPORTING_POLL_INTERVAL
+              value: 15m
+          envFrom:
+            - secretRef:
+                name: reporting-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data/reports
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: reporting-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reporting
+  namespace: oblikovati
+spec:
+  selector:
+    app.kubernetes.io/name: reporting
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: reporting
+  namespace: oblikovati
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: reporting.oblikovati.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: reporting
+                port:
+                  name: http
+  tls:
+    - hosts: [reporting.oblikovati.org]
+      secretName: reporting-tls

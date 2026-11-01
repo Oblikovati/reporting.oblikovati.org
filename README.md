@@ -90,18 +90,22 @@ docker run --rm -p 8080:8080 -e REPORTING_GITHUB_TOKEN=ghp_xxx \
 
 ## Deployment
 
-`.github/workflows/deploy.yml` runs on a push to `main` (or a `v*` tag): it tests, builds and
-pushes the image to GHCR, then deploys over SSH (`docker compose pull && docker compose up -d`
-on the host, with the image ref and secrets written to a host-side `.env`).
+`.github/workflows/deploy.yml` runs on a push to `main` (or a `v*` tag): it tests,
+builds and pushes the image to GHCR, then deploys the immutable image tag to the
+Hetzner K3s cluster. The Kubernetes contract is
+`deploy/kubernetes/production.yaml`. The report storage uses the
+`reporting-data` persistent volume claim; migrate the old volume before the DNS
+cutover.
 
 ### Required GitHub secrets
 
 | Secret | Purpose |
 |---|---|
-| `SSH_HOST`, `SSH_USERNAME`, `SSH_KEY`, `SSH_PORT` | Deploy target connection. |
-| `REPORTING_GITHUB_TOKEN` | Runtime PAT the service uses to open/read issues (written to the host `.env`). |
-| `REPORTING_PUBLIC_BASE_URL` | Public origin for screenshot links. |
-| `REPORTING_GITHUB_OWNER`, `REPORTING_GITHUB_REPO` | Target issue repository. |
+| `KUBECONFIG_HETZNER` | Kubeconfig for the Hetzner K3s deploy job. |
+
+The deploy workflow copies `REPORTING_GITHUB_TOKEN` from its existing GitHub
+secret into the `oblikovati/reporting-secrets` Kubernetes Secret. It never
+enters the image or repository.
 
 `GITHUB_TOKEN` (built-in) is used to push the image to GHCR.
 
