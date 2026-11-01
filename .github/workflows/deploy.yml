@@ -69,10 +69,14 @@ jobs:
         env:
           KUBECONFIG_HETZNER: ${{ secrets.KUBECONFIG_HETZNER }}
           IMAGE_REF: ${{ needs.build-push.outputs.image }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           REPORTING_GITHUB_TOKEN: ${{ secrets.REPORTING_GITHUB_TOKEN }}
         run: |
           printf '%s' "$KUBECONFIG_HETZNER" > kubeconfig
           export KUBECONFIG="$PWD/kubeconfig"
+          kubectl create secret docker-registry ghcr-pull --namespace oblikovati \
+            --docker-server=ghcr.io --docker-username=viniciusmiguel \
+            --docker-password="$GHCR_PULL_TOKEN" --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic reporting-secrets --namespace oblikovati \
             --from-literal=REPORTING_GITHUB_TOKEN="$REPORTING_GITHUB_TOKEN" \
             --dry-run=client -o yaml | kubectl apply -f -
