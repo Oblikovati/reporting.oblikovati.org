@@ -1,0 +1,97 @@
+name: Migrate reporting storage
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open K3s API tunnel
+        env:
+          HETZNER_SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$HETZNER_SSH_KEY" > ~/.ssh/hetzner
+          chmod 600 ~/.ssh/hetzner
+          printf '%s\n' '65.109.19.20 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO2uONzdbVdL8rkEb1XNxil1OWuFZYJheESxuwEOfItw' > ~/.ssh/known_hosts
+          ssh -fN -i ~/.ssh/hetzner -o StrictHostKeyChecking=yes -L 16443:127.0.0.1:6443 root@65.109.19.20
+      - name: Create transfer pod
+        env:
+          KUBECONFIG_HETZNER: ${{ secrets.KUBECONFIG_HETZNER }}
+        run: |
+          printf '%s' "$KUBECONFIG_HETZNER" > kubeconfig
+          export KUBECONFIG="$PWD/kubeconfig"
+          kubectl apply -f - <<'EOF'
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: reporting-data
+            namespace: oblikovati
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 5Gi
+          ---
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: reporting-storage-transfer
+            namespace: oblikovati
+          spec:
+            restartPolicy: Never
+            automountServiceAccountToken: false
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 65532
+              runAsGroup: 65532
+              fsGroup: 65532
+              seccompProfile:
+                type: RuntimeDefault
+            containers:
+              - name: transfer
+                image: alpine:3.21
+                command: [sleep, "3600"]
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop: [ALL]
+                volumeMounts:
+                  - name: reports
+                    mountPath: /data/reports
+            volumes:
+              - name: reports
+                persistentVolumeClaim:
+                  claimName: reporting-data
+          EOF
+          kubectl wait --for=condition=Ready pod/reporting-storage-transfer -n oblikovati --timeout=120s
+      - name: Stream reports from DigitalOcean
+        env:
+          KUBECONFIG_HETZNER: ${{ secrets.KUBECONFIG_HETZNER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+        run: |
+          printf '%s' "$KUBECONFIG_HETZNER" > kubeconfig
+          export KUBECONFIG="$PWD/kubeconfig"
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/digitalocean
+          chmod 600 ~/.ssh/digitalocean
+          ssh -i ~/.ssh/digitalocean -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$SSH_USERNAME@$SSH_HOST" '
+            set -eu
+            set -- $(docker volume ls -q --filter name=reporting)
+            test "$#" -eq 1
+            docker run --rm -v "$1":/data:ro alpine:3.21 tar -C /data -czf - .
+          ' | kubectl exec -i -n oblikovati reporting-storage-transfer -- tar -C /data/reports -xzf -
+      - name: Verify transferred reports
+        env:
+          KUBECONFIG_HETZNER: ${{ secrets.KUBECONFIG_HETZNER }}
+        run: |
+          printf '%s' "$KUBECONFIG_HETZNER" > kubeconfig
+          export KUBECONFIG="$PWD/kubeconfig"
+          kubectl exec -n oblikovati reporting-storage-transfer -- sh -c 'find /data/reports -mindepth 1 -maxdepth 1 -type d | wc -l'
