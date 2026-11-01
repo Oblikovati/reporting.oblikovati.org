@@ -85,7 +85,8 @@ jobs:
           export KUBECONFIG="$PWD/kubeconfig"
           printf '%s\n' "$SSH_KEY" > ~/.ssh/digitalocean
           chmod 600 ~/.ssh/digitalocean
-          ssh -i ~/.ssh/digitalocean -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$SSH_USERNAME@$SSH_HOST" '
+          ssh -i ~/.ssh/digitalocean -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=20 \
+            -o ServerAliveInterval=10 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=accept-new "$SSH_USERNAME@$SSH_HOST" '
             set -eu
             set -- $(docker volume ls -q --filter name=reporting)
             test "$#" -eq 1
